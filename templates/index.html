@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced BGP Simulator</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Courier New', monospace; margin: 0; padding: 0; display: flex; height: 100vh; background: #0d1117; color: #c9d1d9; overflow: hidden; }
+
+        #sidebar { width: 320px; background: #161b22; border-right: 1px solid #30363d; padding: 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+        #sidebar h2 { margin: 0 0 2px 0; font-size: 17px; color: #58a6ff; letter-spacing: 1px; text-transform: uppercase; }
+        .subtitle { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
+        label { font-size: 11px; color: #8b949e; display: block; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+        select, input { width: 100%; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; font-size: 13px; font-family: 'Courier New', monospace; }
+        select:focus, input:focus { outline: none; border-color: #58a6ff; }
+        button { width: 100%; padding: 10px; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; font-family: 'Courier New', monospace; font-weight: bold; transition: background 0.15s, opacity 0.15s; }
+        button:disabled { opacity: 0.35; cursor: not-allowed; }
+        #btn-generate { background: #238636; color: #fff; }
+        #btn-generate:hover:not(:disabled) { background: #2ea043; }
+        #btn-simulate { background: #1f6feb; color: #fff; }
+        #btn-simulate:hover:not(:disabled) { background: #388bfd; }
+        .divider { border-top: 1px solid #21262d; margin: 2px 0; }
+
+        .legend { display: flex; flex-direction: column; gap: 5px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #8b949e; }
+        .ld { width: 24px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+        .ld.planned { background: #58a6ff; }
+        .ld.actual  { background: #f85149; }
+        .ld.changed { background: #e3b341; }
+        .ld.reroute { background: #a371f7; }
+        .lc { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+        .lc.current { background: #ff4444; }
+        .lc.done    { background: #3fb950; }
+
+        .speed-row { display: flex; align-items: center; gap: 8px; }
+        .speed-row input[type=range] { width: 100%; accent-color: #58a6ff; }
+        .speed-label { font-size: 10px; color: #8b949e; white-space: nowrap; }
+
+        #console { background: #0d1117; border: 1px solid #30363d; border-radius: 4px; padding: 8px; font-size: 11px; height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; color: #3fb950; }
+        #console .log-warn   { color: #e3b341; }
+        #console .log-error  { color: #f85149; }
+        #console .log-info   { color: #58a6ff; }
+        #console .log-reroute{ color: #a371f7; font-weight: bold; }
+
+        #network-container { flex-grow: 1; position: relative; background: #0d1117; }
+        #mynetwork { width: 100%; height: 100%; }
+
+        #bgp-panel { position: absolute; top: 16px; right: 16px; width: 310px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; display: none; max-height: 70vh; overflow-y: auto; z-index: 20; }
+        #bgp-panel h3 { margin: 0 0 8px 0; font-size: 13px; color: #58a6ff; }
+        .bgp-entry { border: 1px solid #21262d; padding: 7px 9px; margin-bottom: 6px; border-radius: 4px; font-size: 11px; background: #0d1117; }
+        .bgp-attr { color: #e3b341; font-weight: bold; }
+
+        #status-badge { position: absolute; top: 16px; left: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 20px; padding: 6px 16px; font-size: 12px; color: #8b949e; display: none; z-index: 20; }
+        #status-badge.live { color: #3fb950; border-color: #3fb950; }
+        #status-badge .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 6px; animation: pulse 1.2s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        #comparison-panel { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); min-width: 580px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 20px; display: none; z-index: 20; }
+        #comparison-panel h3 { margin: 0 0 12px 0; font-size: 13px; color: #c9d1d9; text-transform: uppercase; letter-spacing: 1px; }
+        .cost-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+        .cost-card { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; text-align: center; }
+        .cost-card .cost-label { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .cost-card .cost-value { font-size: 26px; font-weight: bold; }
+        .cost-card.pb .cost-value { color: #8b949e; }
+        .cost-card.pa .cost-value { color: #e3b341; }
+        .cost-card.ac .cost-value { color: #3fb950; }
+        .savings-bar { height: 5px; border-radius: 3px; background: #21262d; overflow: hidden; margin-bottom: 7px; }
+        .savings-fill { height: 100%; border-radius: 3px; background: #3fb950; transition: width 0.9s ease; }
+        .verdict { font-size: 12px; color: #8b949e; text-align: center; }
+        .verdict .better { color: #3fb950; font-weight: bold; }
+        .verdict .worse  { color: #f85149; font-weight: bold; }
+        .changes-list { margin-top: 10px; font-size: 11px; color: #8b949e; max-height: 72px; overflow-y: auto; border-top: 1px solid #21262d; padding-top: 8px; }
+        .chg.on-path { color: #e3b341; }
+        #close-cmp { position: absolute; top: 10px; right: 12px; background: none; border: none; color: #8b949e; cursor: pointer; font-size: 16px; padding: 0; width: auto; }
+        #close-cmp:hover { color: #c9d1d9; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div>
+        <h2>🌐 BGP Simulator</h2>
+        <div class="subtitle">Live Per-Hop Routing</div>
+    </div>
+    <div class="divider"></div>
+    <div><label>Number of AS</label><input type="number" id="num_as" value="4" min="2" max="10"></div>
+    <div><label>Routers per AS</label><input type="number" id="routers_per_as" value="5" min="2" max="15"></div>
+    <button id="btn-generate" onclick="generateTopology()">⟳ Generate Topology</button>
+    <div class="divider"></div>
+    <div><label>Source Router</label><select id="source_select" disabled></select></div>
+    <div><label>Destination Router</label><select id="dest_select" disabled></select></div>
+
+    <div class="speed-row">
+        <span class="speed-label">SLOW</span>
+        <input type="range" id="speed_slider" min="400" max="3000" value="1600" step="100">
+        <span class="speed-label">FAST</span>
+    </div>
+
+    <button id="btn-simulate" onclick="simulateRouting()" disabled>▶ Start Live Routing</button>
+    <div class="divider"></div>
+    <div class="legend">
+        <div class="legend-item"><div class="ld planned"></div>Planned path (initial)</div>
+        <div class="legend-item"><div class="ld actual"></div>Actual path (live hops)</div>
+        <div class="legend-item"><div class="ld changed"></div>Weight changed mid-transit</div>
+        <div class="legend-item"><div class="ld reroute"></div>Hop diverged from plan</div>
+        <div class="legend-item"><div class="lc current"></div>Current hop</div>
+        <div class="legend-item"><div class="lc done"></div>Destination reached</div>
+    </div>
+    <div class="divider"></div>
+    <label>Console</label>
+    <div id="console"><div class="log-info">&gt; Ready. Generate a topology to begin.</div></div>
+</div>
+
+<div id="network-container">
+    <div id="mynetwork"></div>
+    <div id="status-badge"><span class="dot"></span><span id="status-text">Idle</span></div>
+
+    <div id="bgp-panel">
+        <h3 id="bgp-title">Router Info</h3>
+        <div id="bgp-details" style="font-size:12px;margin-bottom:8px;color:#8b949e;"></div>
+        <div style="font-size:11px;color:#8b949e;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px;">Loc-RIB</div>
+        <div id="bgp-routes"></div>
+    </div>
+
+    <div id="comparison-panel">
+        <button id="close-cmp" onclick="document.getElementById('comparison-panel').style.display='none'">✕</button>
+        <h3>📊 Route Cost Comparison</h3>
+        <div class="cost-grid">
+            <div class="cost-card pb">
+                <div class="cost-label">Planned — before changes</div>
+                <div class="cost-value" id="cost-pb">—</div>
+            </div>
+            <div class="cost-card pa">
+                <div class="cost-label">Planned — if forced anyway</div>
+                <div class="cost-value" id="cost-pa">—</div>
+            </div>
+            <div class="cost-card ac">
+                <div class="cost-label">Actual (dynamic) path</div>
+                <div class="cost-value" id="cost-ac">—</div>
+            </div>
+        </div>
+        <div class="savings-bar"><div class="savings-fill" id="savings-fill" style="width:0%"></div></div>
+        <div class="verdict" id="verdict"></div>
+        <div class="changes-list" id="changes-list"></div>
+    </div>
+</div>
+
+<script>
+let network = null;
+let nodesData = new vis.DataSet([]);
+let edgesData = new vis.DataSet([]);
+let eventSource = null;
+let changedEdgeIds = new Set(); // edges currently marked orange (changed in the last run)
+
+function edgeKey(u, v) { return [u,v].sort().join('||'); }
+function findEdge(u, v) { return edgesData.get({ filter: e => edgeKey(e.from, e.to) === edgeKey(u, v) }); }
+
+function initNetwork() {
+    const container = document.getElementById('mynetwork');
+    network = new vis.Network(container, { nodes: nodesData, edges: edgesData }, {
+        physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -55, springLength: 110, springConstant: 0.05 } },
+        nodes: { size: 14, font: { size: 11, face: 'Courier New', color: '#c9d1d9' }, borderWidth: 2, color: { background: '#1f2937', border: '#374151' } },
+        edges: { color: { inherit: false, color: '#374151' }, width: 1.5, smooth: false, font: { size: 10, color: '#6b7280', face: 'Courier New', align: 'top' } }
+    });
+    network.on("click", p => {
+        if (p.nodes.length > 0) fetchRouterInfo(p.nodes[0]);
+        else document.getElementById('bgp-panel').style.display = 'none';
+    });
+}
+
+function log(msg, cls='') {
+    const el = document.getElementById('console');
+    el.innerHTML += `<div class="${cls ? 'log-'+cls : ''}">&gt; ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(text, live) {
+    const badge = document.getElementById('status-badge');
+    badge.style.display = 'block';
+    badge.classList.toggle('live', !!live);
+    document.getElementById('status-text').innerText = text;
+}
+
+async function fetchRouterInfo(rid) {
+    try {
+        const d = await (await fetch(`/api/router/${rid}`)).json();
+        document.getElementById('bgp-title').innerText = `${d.id}${d.is_border?' [BORDER]':''}`;
+        document.getElementById('bgp-details').innerHTML = `AS: <b style="color:#58a6ff">${d.as_number}</b> &nbsp;|&nbsp; IP: ${d.ip}`;
+        let h = '';
+        d.rib.forEach(r => { h += `<div class="bgp-entry"><div><b>Prefix:</b> ${r.prefix}</div><div><span class="bgp-attr">AS_PATH:</span> [${r.as_path.join(' → ')}]</div><div><span class="bgp-attr">Next_Hop:</span> ${r.next_hop}</div><div><span class="bgp-attr">LP:</span> ${r.local_pref} &nbsp;<span class="bgp-attr">MED:</span> ${r.med}</div></div>`; });
+        document.getElementById('bgp-routes').innerHTML = h || '<i style="color:#8b949e">Empty.</i>';
+        document.getElementById('bgp-panel').style.display = 'block';
+    } catch(e) { console.error(e); }
+}
+
+async function generateTopology() {
+    const btn = document.getElementById('btn-generate');
+    btn.disabled = true; btn.innerText = '⟳ Generating...';
+    document.getElementById('bgp-panel').style.display = 'none';
+    document.getElementById('comparison-panel').style.display = 'none';
+    document.getElementById('status-badge').style.display = 'none';
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    try {
+        const d = await (await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ num_as: document.getElementById('num_as').value, routers_per_as: document.getElementById('routers_per_as').value }) })).json();
+        nodesData.clear(); edgesData.clear();
+        nodesData.add(d.nodes); edgesData.add(d.edges);
+        changedEdgeIds.clear();
+        const opt = d.routers.map(r=>`<option value="${r.id}">${r.id} (${r.ip})</option>`).join('');
+        document.getElementById('source_select').innerHTML = opt;
+        document.getElementById('dest_select').innerHTML   = opt;
+        ['source_select','dest_select','btn-simulate'].forEach(id=>document.getElementById(id).disabled=false);
+        log(`Topology ready: ${d.nodes.length} routers, ${d.edges.length} links.`, 'info');
+    } catch(err) { log(`Error: ${err.message}`, 'error'); }
+    btn.disabled = false; btn.innerText = '⟳ Generate Topology';
+}
+
+function resetNodeColors() {
+    nodesData.forEach(n => nodesData.update({ id: n.id, color: { background: '#1f2937', border: '#374151' }, size: 14 }));
+}
+
+function settlePreviousWeightChanges() {
+    // Links that were marked orange in the previous run are now just the
+    // current (settled) link weights — mark them the same gray as normal,
+    // untouched links. They'll turn orange again only if they change
+    // again in this new run.
+    changedEdgeIds.forEach(id => {
+        edgesData.update({ id, color: { color: '#374151', highlight: '#374151' }, width: 1.5 });
+    });
+    changedEdgeIds.clear();
+}
+
+function simulateRouting() {
+    const btn = document.getElementById('btn-simulate');
+    btn.disabled = true;
+    document.getElementById('comparison-panel').style.display = 'none';
+
+    const src = document.getElementById('source_select').value;
+    const dst = document.getElementById('dest_select').value;
+    if (src === dst) { log('Source and destination must differ.', 'error'); btn.disabled=false; return; }
+
+    resetNodeColors();
+    settlePreviousWeightChanges();
+    setStatus('Connecting…', false);
+
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource(`/api/simulate_stream?src=${encodeURIComponent(src)}&dst=${encodeURIComponent(dst)}&delay=${document.getElementById('speed_slider').value}`);
+
+    let plannedPath = [];
+    let lastHopNode = src;
+
+    eventSource.addEventListener('planned_path', (ev) => {
+        const data = JSON.parse(ev.data);
+        plannedPath = data.path;
+        log(`Planned path: ${data.path.join(' → ')}  (cost ${data.cost})`, 'info');
+        setStatus('Live routing…', true);
+
+        // Draw planned path in blue
+        plannedPath.forEach(n => nodesData.update({ id: n, color: { background: '#1d3557', border: '#58a6ff' } }));
+        for (let i = 0; i < plannedPath.length - 1; i++) {
+            const f = findEdge(plannedPath[i], plannedPath[i+1]);
+            if (f.length) edgesData.update({ id: f[0].id, color: { color:'#58a6ff', highlight:'#58a6ff' }, width: 3 });
+        }
+        // mark source
+        nodesData.update({ id: src, color: { background:'#ff4444', border:'#ff0000' }, size: 20 });
+        network.focus(src, { scale: 1.1, animation: { duration: 400 } });
+    });
+
+    eventSource.addEventListener('weight_changed', (ev) => {
+        const c = JSON.parse(ev.data);
+        const f = findEdge(c.u, c.v);
+        if (f.length) {
+            edgesData.update({ id: f[0].id, label: String(c.new), color: { color:'#e3b341', highlight:'#e3b341' }, width: 3 });
+            changedEdgeIds.add(f[0].id);
+        }
+        const marker = c.on_planned_path_ahead ? ' ⚠ on remaining planned path!' : '';
+        log(`⚡ Weight changed mid-transit: ${c.u}↔${c.v}  ${c.old}→${c.new}${marker}`, 'warn');
+    });
+
+    eventSource.addEventListener('hop', (ev) => {
+        const h = JSON.parse(ev.data);
+
+        // Un-highlight previous current node -> visited (dark red)
+        nodesData.update({ id: h.from, color: { background:'#7f1d1d', border:'#f85149' }, size: 14 });
+
+        // Color the edge just crossed — purple if it diverges from plan, else red
+        const f = findEdge(h.from, h.to);
+        if (f.length) {
+            const color = h.rerouted ? '#a371f7' : '#f85149';
+            edgesData.update({ id: f[0].id, color: { color, highlight: color }, width: 4 });
+        }
+
+        // Highlight new current node
+        const isDest = h.is_destination;
+        nodesData.update({
+            id: h.to,
+            color: isDest ? { background:'#14532d', border:'#3fb950' } : { background:'#ff4444', border:'#ff0000' },
+            size: isDest ? 18 : 22
+        });
+        network.focus(h.to, { scale: 1.1, animation: { duration: 400 } });
+
+        const tag = h.rerouted ? ' [REROUTED]' : '';
+        log(`Hop ${h.hop_number}: ${h.from} → ${h.to}${tag}`, h.rerouted ? 'reroute' : '');
+        lastHopNode = h.to;
+    });
+
+    eventSource.addEventListener('done', (ev) => {
+        const data = JSON.parse(ev.data);
+        log(`✓ Destination reached in ${data.actual_path.length - 1} hops.`, 'info');
+        setStatus('Done', false);
+
+        (data.updated_edges || []).forEach(e => {
+            const f = findEdge(e.from, e.to);
+            if (f.length) edgesData.update({ id: f[0].id, label: e.label, font: e.font });
+        });
+
+        showComparison(data);
+        eventSource.close();
+        eventSource = null;
+        btn.disabled = false;
+    });
+
+    eventSource.addEventListener('error', (ev) => {
+        let msg = 'Connection lost.';
+        try { msg = JSON.parse(ev.data).message; } catch(e) {}
+        log(`Error: ${msg}`, 'error');
+        setStatus('Error', false);
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        btn.disabled = false;
+    });
+}
+
+function showComparison(data) {
+    const c = data.costs;
+    document.getElementById('cost-pb').innerText = c.planned_before_changes;
+    document.getElementById('cost-pa').innerText = c.planned_after_changes;
+    document.getElementById('cost-ac').innerText = c.actual;
+    const worst = Math.max(c.planned_after_changes, c.actual, 1);
+    document.getElementById('savings-fill').style.width = Math.max(0, Math.min(100, ((worst - c.actual) / worst * 100))) + '%';
+    const diff = c.planned_after_changes - c.actual;
+    const v = document.getElementById('verdict');
+    if (Math.abs(diff) < 2) v.innerHTML = `Same path — dynamic rerouting found no cheaper alternative.`;
+    else if (diff > 0) v.innerHTML = `Live per-hop rerouting saved <span class="better">${diff} cost units</span> vs. blindly following the original planned route.`;
+    else v.innerHTML = `Forcing the original planned route would actually have cost <span class="worse">${Math.abs(diff)} less</span> — dynamic rerouting wasn't optimal here.`;
+    let h = '<b style="color:#c9d1d9">Weight changes during transit:</b><br>';
+    (data.weight_changes || []).forEach(ch => { h += `<div class="chg ${ch.on_planned_path_ahead?'on-path':''}">⚡ ${ch.u} ↔ ${ch.v}: ${ch.old} → ${ch.new}${ch.on_planned_path_ahead?' ⚠ (was ahead on planned path)':''}</div>`; });
+    if (!data.weight_changes || data.weight_changes.length === 0) h += '<i>No weight changes occurred this run.</i>';
+    document.getElementById('changes-list').innerHTML = h;
+    document.getElementById('comparison-panel').style.display = 'block';
+}
+
+window.onload = initNetwork;
+</script>
+</body>
+</html>
